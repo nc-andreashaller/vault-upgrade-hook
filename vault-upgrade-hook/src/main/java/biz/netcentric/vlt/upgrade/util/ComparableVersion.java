@@ -1,4 +1,4 @@
-package biz.netcentric.vlt.upgrade.version;
+package biz.netcentric.vlt.upgrade.util;
 
 /*
  * Licensed to the Apache Software Foundation (ASF) under one
