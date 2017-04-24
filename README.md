@@ -1,6 +1,6 @@
 # Vault Upgrade Hook
 
- AEM/Jackrabbit content packages allow to place Jars to a package in `META-INF/vault/hooks` that will be executed during installation. These hooks have to implement the interface `InstallHook`. 
+AEM/Jackrabbit content packages allow to place Jars to a package in `META-INF/vault/hooks` that will be executed during installation. These hooks have to implement the interface `InstallHook`. 
 
 InstallHooks are executed for each install phase: PREPARE, INSTALLED and END. If an error occurs FAILED is called for PREPARE or INSTALLED. END is called if installation was successful.
 
@@ -41,4 +41,4 @@ Run information is stored in Phase END under:
 
 ### Interface implementation AEM6.0 and AEM6.1+
  
-The hook requires AEM6 SP3. If you need to run this with an earlier version replace `org.apache.jackrabbit.vault.packaging.InstallHook` by `om.day.jcr.vault.packaging.InstallHook`
+The hook requires AEM6 SP3. If you need to run this with an earlier version replace `org.apache.jackrabbit.vault.packaging.InstallHook` by `com.day.jcr.vault.packaging.InstallHook`
