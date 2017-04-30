@@ -6,7 +6,7 @@
  * which accompanies this distribution, and is available at
  * http://www.eclipse.org/legal/epl-v10.html
  */
-package biz.netcentric.vlt.upgrade.util;
+package biz.netcentric.vlt.upgrade.handler;
 
 import org.osgi.framework.Bundle;
 import org.osgi.framework.BundleContext;
@@ -20,10 +20,10 @@ public class OsgiUtil {
 
     @SuppressWarnings("unchecked")
     public <T> T getService(Class<T> clazz) {
-        Bundle bundle = FrameworkUtil.getBundle(clazz);
-        BundleContext context = bundle.getBundleContext();
+	Bundle bundle = FrameworkUtil.getBundle(clazz);
+	BundleContext context = bundle.getBundleContext();
 	ServiceReference<?> serviceReference = context.getServiceReference(clazz.getName());
-        return (T) context.getService(serviceReference);
+	return (T) context.getService(serviceReference);
     }
 
 }

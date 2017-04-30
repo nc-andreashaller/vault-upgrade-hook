@@ -11,22 +11,31 @@ package biz.netcentric.vlt.upgrade.handler.groovy;
 import java.util.ArrayList;
 import java.util.List;
 
-import org.apache.commons.lang.StringUtils;
-import org.apache.sling.api.resource.Resource;
+import javax.jcr.Node;
+import javax.jcr.NodeIterator;
+import javax.jcr.RepositoryException;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.citytechinc.aem.groovy.console.GroovyConsoleService;
 
-import biz.netcentric.vlt.upgrade.handler.UpgradeAction;
+import biz.netcentric.vlt.upgrade.UpgradeAction;
+import biz.netcentric.vlt.upgrade.UpgradeInfo;
+import biz.netcentric.vlt.upgrade.handler.OsgiUtil;
 import biz.netcentric.vlt.upgrade.handler.UpgradeHandler;
-import biz.netcentric.vlt.upgrade.util.OsgiUtil;
 
+/**
+ * This handler creates {@link GroovyScript} instances which are executed via
+ * the {@link GroovyConsoleService}.
+ * 
+ * Each child of the {@link UpgradeInfo} node is checked to be a Groovy script.
+ */
 public class GroovyConsoleHandler implements UpgradeHandler {
 
     private static final Logger LOG = LoggerFactory.getLogger(GroovyConsoleHandler.class);
 
-    OsgiUtil osgi = new OsgiUtil();
+    private static OsgiUtil osgi = new OsgiUtil();
     private GroovyConsoleService service;
 
     @Override
@@ -34,25 +43,22 @@ public class GroovyConsoleHandler implements UpgradeHandler {
 	return getService() != null;
     }
 
-    /**
-     * Builds the Map of Phases with a List of ScriptPaths for each Phase.
-     * @return Map of ScriptPaths per Phase
-     */
     @Override
-    public List<UpgradeAction> loadActions(Resource configResource) {
+    public List<UpgradeAction> create(UpgradeInfo info) throws RepositoryException {
 	List<UpgradeAction> scripts = new ArrayList<>();
 
-	for (Resource child : configResource.getChildren()) {
-            if (StringUtils.endsWith(child.getName(), ".groovy") && child.isResourceType("nt:file")) {
-                // it's a script, assign the script to a phase
-		scripts.add(new GroovyScriptUpgrade(getService(), child));
-            }
-        }
+	NodeIterator nodes = info.getNode().getNodes();
+	while (nodes.hasNext()) {
+	    Node child = nodes.nextNode();
+	    if (child.getName().endsWith(".groovy") && child.isNodeType("nt:file")) {
+		scripts.add(new GroovyScript(getService(), child, info.getDefaultPhase()));
+	    }
+	}
 
-        return scripts;
+	return scripts;
     }
 
-    private GroovyConsoleService getService() {
+    protected GroovyConsoleService getService() {
 	if (service == null) {
 	    try {
 		service = osgi.getService(GroovyConsoleService.class);
@@ -61,6 +67,10 @@ public class GroovyConsoleHandler implements UpgradeHandler {
 	    }
 	}
 	return service;
+    }
+
+    public static void setOsgi(OsgiUtil osgi) {
+	GroovyConsoleHandler.osgi = osgi;
     }
 
 }

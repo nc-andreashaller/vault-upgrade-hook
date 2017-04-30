@@ -11,21 +11,23 @@ package biz.netcentric.vlt.upgrade.handler.slingpipes;
 import java.util.ArrayList;
 import java.util.Collection;
 
-import org.apache.commons.lang.StringUtils;
+import javax.jcr.RepositoryException;
+
 import org.apache.sling.api.resource.Resource;
 import org.apache.sling.pipes.Plumber;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import biz.netcentric.vlt.upgrade.handler.UpgradeAction;
+import biz.netcentric.vlt.upgrade.UpgradeAction;
+import biz.netcentric.vlt.upgrade.UpgradeInfo;
+import biz.netcentric.vlt.upgrade.handler.SlingUtils;
 import biz.netcentric.vlt.upgrade.handler.UpgradeHandler;
-import biz.netcentric.vlt.upgrade.util.OsgiUtil;
 
 public class SlingPipesHandler implements UpgradeHandler {
 
     private static final Logger LOG = LoggerFactory.getLogger(SlingPipesHandler.class);
 
-    OsgiUtil osgi = new OsgiUtil();
+    SlingUtils sling = new SlingUtils();
     private Plumber service;
 
     @Override
@@ -33,26 +35,22 @@ public class SlingPipesHandler implements UpgradeHandler {
 	return getService() != null;
     }
 
-    /**
-     * Builds the Map of Phases with a List of ScriptPaths for each Phase.
-     * @return Map of ScriptPaths per Phase
-     */
     @Override
-    public Iterable<UpgradeAction> loadActions(Resource resource) {
+    public Iterable<UpgradeAction> create(UpgradeInfo info) throws RepositoryException {
 	Collection<UpgradeAction> pipes = new ArrayList<>();
-        for (Resource child : resource.getChildren()) {
-            // sling pipes
-            if (StringUtils.startsWith(child.getResourceType(), "slingPipes/")) {
-		pipes.add(new SlingPipeUpgrade(getService(), child));
-            }
-        }
+	for (Resource child : sling.getResourceResolver(info.getNode().getSession())
+		.getResource(info.getNode().getPath()).getChildren()) {
+	    if (child.getResourceType().startsWith("slingPipes/")) {
+		pipes.add(new SlingPipe(getService(), child, info.getDefaultPhase()));
+	    }
+	}
 	return pipes;
     }
 
-    private Plumber getService() {
+    protected Plumber getService() {
 	if (service == null) {
 	    try {
-		service = osgi.getService(Plumber.class);
+		service = sling.getService(Plumber.class);
 	    } catch (NoClassDefFoundError e) {
 		LOG.warn("Could not load Plumber.", e);
 	    }

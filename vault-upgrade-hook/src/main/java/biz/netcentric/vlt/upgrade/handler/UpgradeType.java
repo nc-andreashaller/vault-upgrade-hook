@@ -1,20 +1,34 @@
+/*
+ * (C) Copyright 2016 Netcentric AG.
+ *
+ * All rights reserved. This program and the accompanying materials
+ * are made available under the terms of the Eclipse Public License v1.0
+ * which accompanies this distribution, and is available at
+ * http://www.eclipse.org/legal/epl-v10.html
+ */
 package biz.netcentric.vlt.upgrade.handler;
 
 import biz.netcentric.vlt.upgrade.handler.groovy.GroovyConsoleHandler;
 import biz.netcentric.vlt.upgrade.handler.slingpipes.SlingPipesHandler;
 
-public enum HandlerFactory {
-    GROOVY(GroovyConsoleHandler.class), SLINGPIPES(SlingPipesHandler.class);
+/**
+ * This class creates instances of {@link UpgradeHandler} via reflection.
+ */
+public enum UpgradeType {
+
+    GROOVY(GroovyConsoleHandler.class),
+
+    SLINGPIPES(SlingPipesHandler.class);
 
     private final Class<? extends UpgradeHandler> clazz;
 
-    private HandlerFactory(Class<? extends UpgradeHandler> clazz) {
+    private UpgradeType(Class<? extends UpgradeHandler> clazz) {
 	this.clazz = clazz;
     }
 
     public static UpgradeHandler create(String key) {
 	UpgradeHandler handler = null;
-	for (HandlerFactory type : values()) {
+	for (UpgradeType type : values()) {
 	    if (type.name().equalsIgnoreCase(key)) {
 		handler = create(type.clazz);
 	    }

@@ -1,14 +1,25 @@
+/*
+ * (C) Copyright 2016 Netcentric AG.
+ *
+ * All rights reserved. This program and the accompanying materials
+ * are made available under the terms of the Eclipse Public License v1.0
+ * which accompanies this distribution, and is available at
+ * http://www.eclipse.org/legal/epl-v10.html
+ */
 package biz.netcentric.vlt.upgrade;
 
 import java.util.Arrays;
 
+import javax.jcr.Session;
+
+import org.apache.jackrabbit.JcrConstants;
+import org.apache.jackrabbit.commons.JcrUtils;
 import org.apache.jackrabbit.vault.fs.io.ImportOptions;
 import org.apache.jackrabbit.vault.packaging.InstallContext;
 import org.apache.jackrabbit.vault.packaging.InstallContext.Phase;
 import org.apache.jackrabbit.vault.packaging.PackageException;
 import org.apache.jackrabbit.vault.packaging.VaultPackage;
-import org.apache.sling.api.resource.Resource;
-import org.apache.sling.api.resource.ResourceResolverFactory;
+import org.apache.sling.testing.mock.sling.ResourceResolverType;
 import org.apache.sling.testing.mock.sling.junit.SlingContext;
 import org.junit.Assert;
 import org.junit.Before;
@@ -20,27 +31,22 @@ import org.mockito.Mock;
 import org.mockito.Mockito;
 import org.mockito.runners.MockitoJUnitRunner;
 
-import biz.netcentric.vlt.upgrade.handler.UpgradeAction;
 import biz.netcentric.vlt.upgrade.handler.UpgradeHandler;
-import biz.netcentric.vlt.upgrade.util.OsgiUtil;
 
 @RunWith(MockitoJUnitRunner.class)
 public class UpgradeProcessorTest {
 
     @Rule
-    public final SlingContext sling = new SlingContext();
+    public final SlingContext sling = new SlingContext(ResourceResolverType.JCR_MOCK);
 
     @Mock(answer = Answers.RETURNS_DEEP_STUBS)
     private InstallContext ctx;
 
     @Mock
-    private OsgiUtil osgi;
-
-    @Mock
     private VaultPackage vaultPackage;
 
     @Mock
-    private UpgradePackage upgradePackage;
+    private UpgradeInfo gorup;
 
     @Mock
     private static UpgradeAction action;
@@ -54,15 +60,13 @@ public class UpgradeProcessorTest {
     public void setup() {
 	Mockito.reset(action);
 	processor = new UpgradeProcessor();
-	processor.osgi = osgi;
 	Mockito.when(ctx.getOptions()).thenReturn(Mockito.mock(ImportOptions.class));
+	Mockito.when(ctx.getSession()).thenReturn(sling.resourceResolver().adaptTo(Session.class));
     }
 
     @Test
     public void testExecutePrepare() throws Exception {
 	Mockito.when(ctx.getPhase()).thenReturn(Phase.PREPARE);
-	Mockito.when(osgi.getService(ResourceResolverFactory.class))
-		.thenReturn(sling.getService(ResourceResolverFactory.class));
 	Mockito.when(ctx.getPackage().getId().getName()).thenReturn("testVaultPackage");
 	Mockito.when(ctx.getPackage().getId().getGroup()).thenReturn("testVaultGroup");
 	Mockito.when(ctx.getPackage().getId().getInstallationPath()).thenReturn("/test/installation/path");
@@ -73,69 +77,73 @@ public class UpgradeProcessorTest {
 	sling.load().json("/biz/netcentric/vlt/upgrade/testUpgrade.json",
 		"/test/installation/path.zip/jcr:content/vlt:definition/upgrader");
 
-	Mockito.when(action.getName()).thenReturn("PREPARE-testAction");
+	Mockito.when(action.getName()).thenReturn("testAction");
+	Mockito.when(action.getPhase()).thenReturn(Phase.PREPARE);
+	Mockito.when(action.isRelevant(Mockito.eq(ctx), Mockito.any(UpgradeInfo.class))).thenReturn(true);
 
 	processor.execute(ctx);
 
-	Assert.assertFalse(processor.failed);
 	Assert.assertEquals("1.0.0", processor.status.getLastExecution().toString());
-	Assert.assertEquals(1, processor.packages.size());
-	Assert.assertEquals("1.0.1-SNAPSHOT", processor.packages.get(0).getTargetVersion().toString());
-	Assert.assertTrue(processor.packages.get(0).isRelevant());
-	Mockito.verify(action).execute(Mockito.any(InstallContext.class));
+	Assert.assertEquals(1, processor.infos.size());
+	Assert.assertEquals("1.0.1-SNAPSHOT", processor.infos.get(0).getTargetVersion().toString());
+	Assert.assertTrue(processor.infos.get(0).isRelevant());
+	Mockito.verify(action).execute(ctx);
     }
 
     @Test
     public void testExecuteInstalled() throws Exception {
-	processor.packages = Arrays.asList(upgradePackage);
+	processor.infos = Arrays.asList(gorup);
 
 	Mockito.when(ctx.getPhase()).thenReturn(Phase.INSTALLED);
 
 	processor.execute(ctx);
 
-	Mockito.verify(upgradePackage).execute(ctx);
+	Mockito.verify(gorup).execute(ctx);
     }
 
     @Test
     public void testExecuteEnd() throws Exception {
 	processor.status = status;
-	processor.packages = Arrays.asList(upgradePackage);
+	processor.infos = Arrays.asList(gorup);
 
 	Mockito.when(ctx.getPhase()).thenReturn(Phase.END);
 
+	JcrUtils.getOrCreateByPath("/test", JcrConstants.NT_UNSTRUCTURED, ctx.getSession());
+	Assert.assertTrue("Make sure the session has changed to verify save after execution.",
+		ctx.getSession().hasPendingChanges());
+
 	processor.execute(ctx);
 
-	Mockito.verify(upgradePackage).execute(ctx);
-	Mockito.verify(ctx.getSession()).save();
+	Mockito.verify(gorup).execute(ctx);
+	Assert.assertFalse(ctx.getSession().hasPendingChanges());
 	Mockito.verify(status).update(ctx);
-	Mockito.verify(status).updateActions(ctx, upgradePackage);
+	Mockito.verify(status).updateActions(ctx, gorup);
     }
 
     @Test
     public void testExecuteFailed() throws Exception {
-	processor.failed = false;
+	processor.status = status;
+	processor.infos = Arrays.asList(gorup);
+
 	Mockito.when(ctx.getPhase()).thenReturn(Phase.PREPARE_FAILED);
 	processor.execute(ctx);
-	Assert.assertTrue(processor.failed);
+	Mockito.verify(gorup).execute(ctx);
 
-	processor.failed = false;
+	Mockito.reset(gorup);
+
 	Mockito.when(ctx.getPhase()).thenReturn(Phase.INSTALL_FAILED);
 	processor.execute(ctx);
-	Assert.assertTrue(processor.failed);
+	Mockito.verify(gorup).execute(ctx);
     }
 
     @Test(expected = PackageException.class)
     public void testExecuteException() throws Exception {
-	processor.packages = Arrays.asList(upgradePackage);
+	processor.infos = Arrays.asList(gorup);
 
 	Mockito.when(ctx.getPhase()).thenReturn(Phase.INSTALLED);
-	Mockito.doThrow(new IllegalArgumentException("testException")).when(upgradePackage).execute(ctx);
+	Mockito.doThrow(new IllegalArgumentException("testException")).when(gorup).execute(ctx);
 
-	try {
-	    processor.execute(ctx);
-	} finally {
-	    Assert.assertTrue(processor.failed);
-	}
+	processor.execute(ctx);
     }
 
     public static class TestHandler implements UpgradeHandler {
@@ -146,7 +154,7 @@ public class UpgradeProcessorTest {
 	}
 
 	@Override
-	public Iterable<UpgradeAction> loadActions(Resource configResource) {
+	public Iterable<UpgradeAction> create(UpgradeInfo info) {
 	    return Arrays.asList(action);
 	}
 

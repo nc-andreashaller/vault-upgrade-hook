@@ -12,153 +12,129 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
+import javax.jcr.Node;
+import javax.jcr.NodeIterator;
 import javax.jcr.RepositoryException;
+import javax.jcr.Session;
 
 import org.apache.jackrabbit.vault.packaging.InstallContext;
+import org.apache.jackrabbit.vault.packaging.InstallContext.Phase;
 import org.apache.jackrabbit.vault.packaging.InstallHook;
 import org.apache.jackrabbit.vault.packaging.PackageException;
 import org.apache.jackrabbit.vault.packaging.PackageId;
-import org.apache.sling.api.resource.LoginException;
-import org.apache.sling.api.resource.Resource;
-import org.apache.sling.api.resource.ResourceResolver;
-import org.apache.sling.api.resource.ResourceResolverFactory;
 
-import biz.netcentric.vlt.upgrade.util.OsgiUtil;
 import biz.netcentric.vlt.upgrade.util.PackageInstallLogger;
 
+/**
+ * This class is the main entry point for the <b>vault-upgrade-hook</b>
+ * execution. {@link #execute(InstallContext)} is called for each content
+ * package installation {@link Phase}. On {@link Phase#PREPARE} the environment
+ * consisting of {@link UpgradeStatus}, {@link UpgradeInfo}s and
+ * {@link UpgradeAction}s is created. The packages are executed for each phase.
+ * On {@link Phase#END} the provided {@link Session} will be saved and the
+ * status of the upgrade will be stored to {@code /var/upgrade}.
+ */
 public class UpgradeProcessor implements InstallHook {
 
     private static final PackageInstallLogger LOG = PackageInstallLogger.create(UpgradeProcessor.class);
 
-    private static final String STATUS_PATH = "/var/upgrade";
-    private static final String UPGRADER_PATH_IN_PACKAGE = ".zip/jcr:content/vlt:definition/upgrader";
+    /**
+     * Absolute path where information of the {@link UpgradeInfo} execution are
+     * stored.
+     */
+    public static final String STATUS_PATH = "/var/upgrade";
+
+    /**
+     * Relative path within a content package where {@link UpgradeInfo}
+     * definitions are stored.
+     */
+    public static final String UPGRADER_PATH_IN_PACKAGE = ".zip/jcr:content/vlt:definition/upgrader";
 
     // fields are package private for unit tests
-    OsgiUtil osgi = new OsgiUtil();
-    boolean failed = false;
     UpgradeStatus status;
-    List<UpgradePackage> packages;
-
-    // ----< InstallHook interface >--------------------------------------------
+    List<UpgradeInfo> infos;
 
     @Override
     public void execute(InstallContext ctx) throws PackageException {
-	LOG.info(ctx, "starting [{}{}]", ctx.getPhase(), failed ? ": FAILED" : "");
+	LOG.info(ctx, "starting [{}]", ctx.getPhase());
 
 	try {
-	    if (!failed) {
-		switch (ctx.getPhase()) {
-		case PREPARE:
-		    ResourceResolver resourceResolver = getResourceResolver(ctx);
-		    loadStatus(ctx, resourceResolver);
-		    loadRelevantPackages(ctx, resourceResolver);
-		    executePackages(ctx);
-		    break;
-		case INSTALLED:
-		    executePackages(ctx);
-		    break;
-		case END:
-		    executePackages(ctx);
-		    status.update(ctx);
-		    updateActions(ctx);
-		    ctx.getSession().save();
-		    break;
-		case PREPARE_FAILED:
-		case INSTALL_FAILED:
-		default:
-		    failed = true;
-		    break;
-		}
+	    switch (ctx.getPhase()) {
+	    case PREPARE:
+		loadStatus(ctx);
+		loadInfos(ctx);
+		executeInfos(ctx);
+		break;
+	    case INSTALLED:
+	    case PREPARE_FAILED:
+	    case INSTALL_FAILED:
+		executeInfos(ctx);
+		break;
+	    case END:
+		executeInfos(ctx);
+		status.update(ctx);
+		updateActions(ctx);
+		ctx.getSession().save();
+		break;
 	    }
 	} catch (Exception e) {
-	    failed = true;
 	    LOG.error(ctx, "Error during content upgrade", e);
 	    throw new PackageException(e);
 	} finally {
-	    LOG.debug(ctx, "finished [{}{}]", ctx.getPhase(), failed ? ": FAILED" : "");
+	    LOG.debug(ctx, "finished [{}]", ctx.getPhase());
 	}
     }
 
-    private void updateActions(InstallContext ctx) throws RepositoryException {
-	LOG.debug(ctx, "updating actions [{}]", packages);
-	for (UpgradePackage pckg : packages) {
-	    status.updateActions(ctx, pckg);
+    protected void updateActions(InstallContext ctx) throws RepositoryException {
+	LOG.debug(ctx, "updating actions [{}]", infos);
+	for (UpgradeInfo info : infos) {
+	    status.updateActions(ctx, info);
 	}
     }
 
-    private void executePackages(InstallContext ctx) throws RepositoryException {
-	LOG.debug(ctx, "starting package execution [{}]", packages);
-	for (UpgradePackage pckg : packages) {
-	    pckg.execute(ctx);
+    protected void executeInfos(InstallContext ctx) throws RepositoryException {
+	LOG.debug(ctx, "starting package execution [{}]", infos);
+	for (UpgradeInfo info : infos) {
+	    info.execute(ctx);
 	}
     }
 
-    /**
-     * Load and return all upgrade infos in the package.
-     * 
-     * @param ctx
-     *            The install context.
-     * @param resourceResolver
-     * @return A list of upgrade infos.
-     * @throws RepositoryException
-     * @throws LoginException
-     */
-    protected void loadRelevantPackages(InstallContext ctx, ResourceResolver resourceResolver)
-	    throws RepositoryException {
+    protected void loadInfos(InstallContext ctx) throws RepositoryException {
 
 	String upgradeInfoPath = ctx.getPackage().getId().getInstallationPath() + UPGRADER_PATH_IN_PACKAGE;
-	Resource upgradeInfoResource = resourceResolver.getResource(upgradeInfoPath);
-	LOG.debug(ctx, "loading packages [{}]: [{}]", upgradeInfoPath, upgradeInfoResource);
+	Node upgradeInfoNode = ctx.getSession().getNode(upgradeInfoPath);
+	LOG.debug(ctx, "loading packages [{}]: [{}]", upgradeInfoPath, upgradeInfoNode);
 
-	packages = new ArrayList<>();
+	infos = new ArrayList<>();
 
-	if (upgradeInfoResource != null) {
+	if (upgradeInfoNode != null) {
 
-	    for (Resource resource : upgradeInfoResource.getChildren()) {
-		final UpgradePackage pckg = new UpgradePackage(ctx, status, resource);
-		if (pckg.isRelevant()) {
-		    packages.add(pckg);
+	    NodeIterator nodes = upgradeInfoNode.getNodes();
+	    while (nodes.hasNext()) {
+		Node child = nodes.nextNode();
+		final UpgradeInfo info = new UpgradeInfo(status, child, ctx.getPackage().getId().getVersionString());
+		LOG.debug(ctx, "info [{}]", info);
+		if (info.isRelevant()) {
+		    infos.add(info);
 		} else {
-		    LOG.debug(ctx, "package not relevant: [{}]", resource);
+		    LOG.debug(ctx, "package not relevant: [{}]", child);
 		}
 	    }
 
 	    // sort upgrade infos according to their version and priority
-	    Collections.sort(packages);
+	    Collections.sort(infos);
 	} else {
 	    LOG.warn(ctx, "Could not load upgrade info [{}]", upgradeInfoPath);
 	}
     }
 
-    /**
-     * Loads information about the last upgrade execution and populates
-     * {@link #status} with it.
-     * 
-     * @param ctx
-     *            The install context.
-     * @param resourceResolver
-     * @throws RepositoryException
-     */
-    protected void loadStatus(InstallContext ctx, ResourceResolver resourceResolver) throws RepositoryException {
+    protected void loadStatus(InstallContext ctx) throws RepositoryException {
 	String statusPath = getStatusPath(ctx.getPackage().getId());
-	status = new UpgradeStatus(ctx, resourceResolver, statusPath);
+	status = new UpgradeStatus(ctx, statusPath);
     }
 
-    /**
-     * Return the absolute JCR path to the version status information.
-     * 
-     * @param packageId
-     *            The package ID to build the path from.
-     * @return The status path.
-     */
     protected String getStatusPath(PackageId packageId) {
 	return STATUS_PATH + "/" + packageId.getGroup() + "/" + packageId.getName();
-    }
-
-    private ResourceResolver getResourceResolver(InstallContext ctx) throws LoginException {
-	ResourceResolverFactory resourceResolverFactory = osgi.getService(ResourceResolverFactory.class);
-	return resourceResolverFactory
-		.getResourceResolver(Collections.<String, Object>singletonMap("user.jcr.session", ctx.getSession()));
     }
 
 }

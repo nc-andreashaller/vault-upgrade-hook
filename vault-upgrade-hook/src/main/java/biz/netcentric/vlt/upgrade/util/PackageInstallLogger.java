@@ -16,6 +16,9 @@ import org.slf4j.LoggerFactory;
 import org.slf4j.helpers.FormattingTuple;
 import org.slf4j.helpers.MessageFormatter;
 
+/**
+ * Helper class to log during content package installation.
+ */
 public class PackageInstallLogger {
     private final Logger log;
 
@@ -53,11 +56,11 @@ public class PackageInstallLogger {
 	log(ctx, message);
     }
 
-    private FormattingTuple build(InstallContext ctx, String format, Object[] arguments) {
+    protected FormattingTuple build(InstallContext ctx, String format, Object[] arguments) {
 	return MessageFormatter.arrayFormat(format, arguments);
     }
 
-    private void log(InstallContext ctx, FormattingTuple message) {
+    protected void log(InstallContext ctx, FormattingTuple message) {
 	ProgressTrackerListener l = ctx.getOptions().getListener();
 	if (l != null) {
 	    if (message.getThrowable() != null) {
@@ -68,7 +71,7 @@ public class PackageInstallLogger {
 	}
     }
 
-    private Exception toException(Throwable throwable) {
+    protected Exception toException(Throwable throwable) {
 	if (throwable instanceof Exception) {
 	    return (Exception) throwable;
 	} else {

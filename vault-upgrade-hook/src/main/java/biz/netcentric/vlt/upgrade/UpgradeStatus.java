@@ -1,109 +1,99 @@
+/*
+ * (C) Copyright 2016 Netcentric AG.
+ *
+ * All rights reserved. This program and the accompanying materials
+ * are made available under the terms of the Eclipse Public License v1.0
+ * which accompanies this distribution, and is available at
+ * http://www.eclipse.org/legal/epl-v10.html
+ */
 package biz.netcentric.vlt.upgrade;
 
 import java.util.Calendar;
 
+import javax.jcr.Node;
 import javax.jcr.RepositoryException;
-import javax.jcr.Session;
+import javax.jcr.Value;
 
-import org.apache.commons.lang.StringUtils;
-import org.apache.commons.lang.builder.ToStringBuilder;
+import org.apache.jackrabbit.JcrConstants;
 import org.apache.jackrabbit.commons.JcrUtils;
 import org.apache.jackrabbit.vault.packaging.InstallContext;
-import org.apache.sling.api.resource.ModifiableValueMap;
-import org.apache.sling.api.resource.Resource;
-import org.apache.sling.api.resource.ResourceResolver;
-import org.apache.sling.jcr.resource.JcrResourceConstants;
+import org.apache.jackrabbit.vault.packaging.Version;
 
-import biz.netcentric.vlt.upgrade.handler.UpgradeAction;
-import biz.netcentric.vlt.upgrade.util.ComparableVersion;
 import biz.netcentric.vlt.upgrade.util.PackageInstallLogger;
 
+/**
+ * This class represents a previous upgrade execution and has methods to compare
+ * the current execution with the former.
+ */
 public class UpgradeStatus {
 
     private static final PackageInstallLogger LOG = PackageInstallLogger.create(UpgradeStatus.class);
 
-    private static final String PN_UPGRADE_TIME = "time";
-    private static final String PN_VERSION = "version";
-    private static final String PN_ACTION = "actions";
+    public static final String PN_UPGRADE_TIME = "time";
+    public static final String PN_VERSION = "version";
+    public static final String PN_ACTIONS = "actions";
 
-    private final Resource resource;
-    private final ComparableVersion version;
+    private final Node node;
+    private final Version version;
 
-    public UpgradeStatus(InstallContext ctx, ResourceResolver resourceResolver, String path)
-	    throws RepositoryException {
+    public UpgradeStatus(InstallContext ctx, String path) throws RepositoryException {
 	LOG.debug(ctx, "loading status [{}]", path);
-	resource = getOrCreateResource(ctx.getSession(), resourceResolver, path);
-	version = createVersion(resource);
+	node = JcrUtils.getOrCreateByPath(path, JcrConstants.NT_FOLDER, ctx.getSession());
+	version = createVersion(node);
 	LOG.info(ctx, "loaded status [{}]", this);
     }
 
-    private static Resource getOrCreateResource(Session session, ResourceResolver resourceResolver, String path)
-	    throws RepositoryException {
-	JcrUtils.getOrCreateByPath(path, JcrResourceConstants.NT_SLING_FOLDER, session);
-	return resourceResolver.getResource(path);
-    }
-
-    private static ComparableVersion createVersion(Resource resource) {
-	String version = resource.getValueMap().get(PN_VERSION, String.class);
-	if (version != null) {
-	    return new ComparableVersion(version);
+    protected static Version createVersion(Node node) throws RepositoryException {
+	if (node.hasProperty(PN_VERSION)) {
+	    return Version.create(node.getProperty(PN_VERSION).getString());
 	} else {
 	    return null;
 	}
     }
 
-    public final boolean isInitial() {
+    public boolean isInitial() {
 	return version == null;
     }
 
-    public boolean notExecuted(InstallContext ctx, UpgradePackage pckg, UpgradeAction action)
-	    throws RepositoryException {
-	Resource packageStatus = getPackageStatusResource(ctx, pckg);
-	if (packageStatus != null) {
-	    for (String executedAction : packageStatus.getValueMap().get(PN_ACTION, new String[0])) {
-		if (StringUtils.equals(executedAction, action.getName())) {
+    public boolean notExecuted(InstallContext ctx, UpgradeInfo info, UpgradeAction action) throws RepositoryException {
+	Node infoStatus = getInfoStatus(info);
+	if (infoStatus != null && infoStatus.hasProperty(PN_ACTIONS)) {
+	    for (Value executedAction : infoStatus.getProperty(PN_ACTIONS).getValues()) {
+		if (executedAction.getString().equals(action.getName())) {
+		    LOG.debug(ctx, "action [{}] already exected: [{}]", action, infoStatus);
 		    return false;
 		}
 	    }
 	}
+	LOG.debug(ctx, "action [{}] not exected yet: [{}]", action, infoStatus);
 	return true;
     }
 
-    private Resource getPackageStatusResource(InstallContext ctx, UpgradePackage pckg) throws RepositoryException {
-	String packagePath = resource.getPath() + "/" + pckg.getName();
-	JcrUtils.getOrCreateByPath(packagePath, JcrResourceConstants.NT_SLING_FOLDER, ctx.getSession());
-	return resource.getResourceResolver().getResource(packagePath);
+    protected Node getInfoStatus(UpgradeInfo info) throws RepositoryException {
+	String packagePath = node.getPath() + "/" + info.getNode().getName();
+	JcrUtils.getOrCreateByPath(packagePath, JcrConstants.NT_FOLDER, node.getSession());
+	return JcrUtils.getNodeIfExists(packagePath, node.getSession());
     }
 
-    /**
-     * Store the upgrade version and timestamp into the repository.
-     * 
-     * @param ctx
-     *            The install context.
-     * @throws RepositoryException
-     */
     public void update(InstallContext ctx) throws RepositoryException {
-	ModifiableValueMap properties = resource.adaptTo(ModifiableValueMap.class);
-	properties.put(PN_UPGRADE_TIME, Calendar.getInstance());
+	node.setProperty(PN_UPGRADE_TIME, Calendar.getInstance());
 	String versionString = ctx.getPackage().getId().getVersionString();
-	properties.put(PN_VERSION, versionString);
-	LOG.info(ctx, "stored new status [{}]: [{}]", resource, versionString);
+	node.setProperty(PN_VERSION, versionString);
+	LOG.info(ctx, "stored new status [{}]: [{}]", node, versionString);
     }
 
-    public void updateActions(InstallContext ctx, UpgradePackage pckg) throws RepositoryException {
-	ModifiableValueMap properties = getPackageStatusResource(ctx, pckg).adaptTo(ModifiableValueMap.class);
-	properties.put(PN_ACTION, pckg.getExecutedActions().toArray(new String[pckg.getExecutedActions().size()]));
+    public void updateActions(InstallContext ctx, UpgradeInfo info) throws RepositoryException {
+	Node infoStatus = getInfoStatus(info);
+	String[] executedActions = info.getExecutedActions().toArray(new String[info.getExecutedActions().size()]);
+	infoStatus.setProperty(PN_ACTIONS, executedActions);
+	LOG.info(ctx, "stored executed actions [{}]: [{}]", infoStatus, executedActions);
     }
 
-    public ComparableVersion getLastExecution() {
+    public Version getLastExecution() {
 	checkStatus();
 	return version;
     }
 
-    /**
-     * Throws an {@link IllegalStateException} if
-     * {@link #isInitial()}=={@code true}.
-     */
     protected void checkStatus() {
 	if (isInitial()) {
 	    throw new IllegalStateException("Cannot check values of an initial status.");
@@ -112,7 +102,7 @@ public class UpgradeStatus {
 
     @Override
     public String toString() {
-	return new ToStringBuilder(this).append("resource", resource).append("version", version).toString();
+	return super.toString() + " [node=" + node + ", version=" + version + "]";
     }
 
 }
